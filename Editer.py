@@ -1,7 +1,8 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
 
-import requests  # 用来抓取网页的html源码
+import requests
+from httpx import AsyncClient  # 用来抓取网页的html源码
 import random  # 取随机数
 from bs4 import BeautifulSoup  # 用于代替正则式 取源码中相应标签中的内容
 import time  # 时间相关操作
@@ -15,6 +16,7 @@ import pickle
 from PIL import Image
 import time
 import warnings
+import asyncio
 
 
 
@@ -30,13 +32,21 @@ class Editer(object):
         self.color_page_name = '插图'
         self.img_chap_name = '彩页'
 
-        
-        if secret_map == None:
-            self.get_secret_map()
-        else:
-            self.secret_map = secret_map
+        self.img_url_map = dict()
+        self.volume_no = volume_no
 
-        main_html = self.get_html(self.main_page)
+        self.epub_path = root_path
+        self.secret_map = secret_map
+        self.temp_path = ""
+        self.cover_url = ""
+
+
+        self.missing_last_chap_list = []
+        self.is_color_page = True
+    async def fillhtmlandsm(self):
+        if self.secret_map == None:
+            await self.get_secret_map()
+        main_html = await self.get_html(self.main_page)
         bf = BeautifulSoup(main_html, 'html.parser')
         bf = bf.find('div', {'id': 'bookDetailWrapper'})
         self.title = bf.find('h2', {"class": "book-title"}).text
@@ -45,43 +55,38 @@ class Editer(object):
             self.cover_url = re.search(r'src=\"(.*?)\"', str(bf.find('img', {"class": "book-cover"}))).group(1)
         except:
             self.cover_url = 'cid'
-            
-        self.img_url_map = dict()
-        self.volume_no = volume_no
-
-        self.epub_path = root_path
         self.temp_path = check_chars(os.path.join(self.epub_path,  'temp_'+ self.title + '_' + str(self.volume_no)))
-    
-
-
-        self.missing_last_chap_list = []
-        self.is_color_page = True
+        
         
     # 获取html文档内容
-    def get_html(self, url, is_gbk=False):
+    async def get_html(self, url, is_gbk=False):
         while True:
             try:
-                req = requests.get(url=url, headers=self.header, timeout=5)
-                if is_gbk:
-                    req.encoding = 'GBK'       #这里是网页的编码转换，根据网页的实际需要进行修改，经测试这个编码没有问题
-                break
+                async with AsyncClient() as client:
+                    req=await client.get(url=url,headers=self.header,timeout=5)
+                    if is_gbk:
+                        req.encoding = 'GBK'       #这里是网页的编码转换，根据网页的实际需要进行修改，经测试这个编码没有问题
+                    break
             except Exception as e:
-                time.sleep(random.choice(range(5, 10)))
+                asyncio.sleep(random.choice(range(5, 10)))
         return req.text
+                
     
-    def get_html_img(self, url):
+    async def get_html_img(self, url):
         while True:
             try:
-                req=requests.get(url, headers=self.header, timeout=5)
-                break
+                async with AsyncClient() as client:
+                    req=await client.get(url=url,headers=self.header,timeout=5)
+                    break
             except Exception as e:
                 pass
         return req.content
     
-    def get_secret_map(self):
+    async def get_secret_map(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            text = self.get_html(self.read_tool_page).encode('utf-8').decode('unicode_escape')
+            html = await self.get_html(self.read_tool_page)
+            text = html.encode('utf-8').decode('unicode_escape')
         pattern = r'\(new window\[\"RegExp\"\]\(\"(.)\",\"gi\"\),\"(.)\"\)\[\'replace\'\]'
         matches = re.findall(pattern, text)
         self.secret_map = {match[0]:match[1] for match in matches}
@@ -105,8 +110,8 @@ class Editer(object):
         self.img_path = os.path.join(self.temp_path,  'OEBPS/Images')
         os.makedirs(self.img_path, exist_ok=True)
     
-    def get_index_url(self):
-        cata_html = self.get_html(self.cata_page, is_gbk=False)
+    async def get_index_url(self):
+        cata_html =await self.get_html(self.cata_page, is_gbk=False)
         cata_html = self.restore_chars(cata_html)
         bf = BeautifulSoup(cata_html, 'html.parser')
         chap_html_list = bf.find('ol', {'id': 'volumes'}).find_all('li')
@@ -130,8 +135,8 @@ class Editer(object):
                         chap_urls.append(url)
         self.volume = {'name': name, 'chap_names': chap_names, 'chap_urls':chap_urls, 'img_url': img_url}
     
-    def get_chap_list(self):
-        cata_html = self.get_html(self.cata_page, is_gbk=False)
+    async def get_chap_list(self):
+        cata_html = await self.get_html(self.cata_page, is_gbk=False)
         cata_html = self.restore_chars(cata_html)
         bf = BeautifulSoup(cata_html, 'html.parser')
         chap_html_list = bf.find('ol', {'id': 'volumes'}).find_all('li')
@@ -172,7 +177,7 @@ class Editer(object):
         text = self.restore_chars(text)
         return text
     
-    def get_chap_text(self, url, chap_name, return_next_chapter=False):
+    async def get_chap_text(self, url, chap_name, return_next_chapter=False):
         text_chap = ''
         page_no = 1 
         url_ori = url
@@ -183,7 +188,7 @@ class Editer(object):
             else:
                 str_out = f'    正在下载第{page_no}页......'
             print(str_out)
-            content_html = self.get_html(url, is_gbk=False)
+            content_html =await self.get_html(url, is_gbk=False)
             text = self.get_page_text(content_html)
             text_chap += text
             url_new = url_ori.replace('.html', '_{}.html'.format(page_no+1))[len(self.url_head):]
@@ -196,19 +201,19 @@ class Editer(object):
                 break
         return text_chap, next_chap_url
     
-    def get_text(self):
+    async def get_text(self):
         img_strs = []
         self.make_folder()
         if self.is_color_page:
             is_fix_next_chap_url = (self.img_chap_name in self.missing_last_chap_list)
-            text, next_chap_url = self.get_chap_text(self.volume['img_url'], self.img_chap_name, return_next_chapter=is_fix_next_chap_url)
+            text, next_chap_url = await self.get_chap_text(self.volume['img_url'], self.img_chap_name, return_next_chapter=is_fix_next_chap_url)
             if is_fix_next_chap_url: 
                 self.volume['chap_urls'][0] = next_chap_url #正向修复
             text_html_color = text2htmls(self.img_chap_name, text)
             
         for chap_no, (chap_name, chap_url) in enumerate(zip(self.volume['chap_names'], self.volume['chap_urls'])):
             is_fix_next_chap_url = (chap_name in self.missing_last_chap_list)
-            text, next_chap_url = self.get_chap_text(chap_url, chap_name, return_next_chapter=is_fix_next_chap_url)
+            text, next_chap_url = await self.get_chap_text(chap_url, chap_name, return_next_chapter=is_fix_next_chap_url)
             if is_fix_next_chap_url: 
                 self.volume['chap_urls'][chap_no+1] = next_chap_url #正向修复
             text_html = text2htmls(chap_name, text) 
@@ -236,20 +241,20 @@ class Editer(object):
             with open(textfile, 'w+', encoding='utf-8') as f:
                 f.writelines(text_html_color_new)
 
-    def get_image(self, is_gui=False, signal=None):
+    async def get_image(self, is_gui=False, signal=None):
         img_path = self.img_path
         if is_gui:
             len_iter = len(self.img_url_map.items())
             signal.emit('start')
             for i, (img_url, img_name) in enumerate(self.img_url_map.items()):
-                content = self.get_html_img(img_url)
+                content = await self.get_html_img(img_url)
                 with open(img_path+f'/{img_name}.jpg', 'wb') as f:
                     f.write(content) #写入二进制内容 
                 signal.emit(int(100*(i+1)/len_iter))
             signal.emit('end')
         else:
-            for img_url, img_name in tqdm(self.img_url_map.items()):
-                content = self.get_html_img(img_url)
+            for img_url, img_name in self.img_url_map.items():
+                content = await self.get_html_img(img_url)
                 with open(img_path+f'/{img_name}.jpg', 'wb') as f:
                     f.write(content) #写入二进制内容
 
@@ -309,7 +314,7 @@ class Editer(object):
         shutil.rmtree(self.temp_path)
         return epub_file
     
-    def check_volume(self, is_gui=False, signal=None, editline=None):
+    async def check_volume(self, is_gui=False, signal=None, editline=None):
          #没有检测到插图页，手动输入插图页标题
         if self.volume['img_url'] == '':
             hand_in_name = self.hand_in_color_page_name(is_gui, signal, editline)
@@ -327,15 +332,15 @@ class Editer(object):
             print('**************')
         
         if self.check_url(self.volume['img_url']):
-            if self.check_url(self.volume['chap_urls'][0]) and (not self.prev_fix_url(0, len(self.volume['chap_names']))): #如果第一章失效则使用反向递归修复程序, 反向再失败则手动输入
+            if self.check_url(self.volume['chap_urls'][0]) and (not await self.prev_fix_url(0, len(self.volume['chap_names']))): #如果第一章失效则使用反向递归修复程序, 反向再失败则手动输入
                 self.volume['img_url'] = self.hand_in_url('插图', is_gui, signal, editline)
             else:
-                self.volume['img_url'] = self.get_prev_url(0)
+                self.volume['img_url'] = await self.get_prev_url(0)
 
         chap_names = self.volume['chap_names']
         for chap_no, url in enumerate(self.volume['chap_urls']):
             if self.check_url(url):
-                if not self.prev_fix_url(chap_no, len(self.volume['chap_names'])): #先尝试反向递归修复
+                if not await self.prev_fix_url(chap_no, len(self.volume['chap_names'])): #先尝试反向递归修复
                     if chap_no==0: #第一章反向修复失败，有插图页则使用正向修复，没有插图页则采用手动修复
                         if self.volume['img_url'] == '':
                             self.volume['chap_urls'][0] = self.hand_in_url(chap_names[chap_no], is_gui, signal, editline)
@@ -348,21 +353,21 @@ class Editer(object):
     def check_url(self, url):#当检测有问题返回True
         return ('javascript' in url or 'cid' in url)   
     
-    def get_prev_url(self, chap_no): #获取前一个章节的链接
-        content_html = self.get_html(self.volume['chap_urls'][chap_no], is_gbk=False)
+    async def get_prev_url(self, chap_no): #获取前一个章节的链接
+        content_html = await self.get_html(self.volume['chap_urls'][chap_no], is_gbk=False)
         return self.url_head + re.search(r'prevpage="(.*?)"', content_html).group(1) 
     
-    def prev_fix_url(self, chap_no, chap_num):  #反向递归修复缺失链接（后修复前），若成功修复返回True，否则返回False 
+    async def prev_fix_url(self, chap_no, chap_num):  #反向递归修复缺失链接（后修复前），若成功修复返回True，否则返回False 
         if chap_no==chap_num-1: #最后一个章节直接选择不修复 返回False
             return False
         elif self.check_url(self.volume['chap_urls'][chap_no+1]):
-            if self.prev_fix_url(chap_no+1, chap_num):
-                self.volume['chap_urls'][chap_no] = self.get_prev_url(chap_no+1)
+            if await self.prev_fix_url(chap_no+1, chap_num):
+                self.volume['chap_urls'][chap_no] = await self.get_prev_url(chap_no+1)
                 return True
             else:
                 return False
         else:
-            self.volume['chap_urls'][chap_no] = self.get_prev_url(chap_no+1)
+            self.volume['chap_urls'][chap_no] = await self.get_prev_url(chap_no+1)
             return True
         
     def hand_in_msg(self, error_msg='', is_gui=False, signal=None, editline=None):
