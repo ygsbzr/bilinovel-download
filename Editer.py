@@ -7,7 +7,8 @@ import random  # 取随机数
 from bs4 import BeautifulSoup  # 用于代替正则式 取源码中相应标签中的内容
 import time  # 时间相关操作
 import os
-from rich.progress import track as tqdm
+from rich.progress import Progress
+from pathlib import Path
 from utils import *
 import zipfile
 import shutil
@@ -56,7 +57,10 @@ class Editer(object):
         except:
             self.cover_url = 'cid'
         self.temp_path = check_chars(os.path.join(self.epub_path,  'temp_'+ self.title + '_' + str(self.volume_no)))
-        
+        dirPath = Path(self.epub_path)/self.title
+        if not dirPath.exists():
+            dirPath.mkdir()
+        self.epub_path = str(dirPath)
         
     # 获取html文档内容
     async def get_html(self, url, is_gbk=False):
@@ -241,8 +245,9 @@ class Editer(object):
             with open(textfile, 'w+', encoding='utf-8') as f:
                 f.writelines(text_html_color_new)
 
-    async def get_image(self, is_gui=False, signal=None):
+    async def get_image(self, is_gui=False, signal=None,p:Progress=None):
         img_path = self.img_path
+        task=p.add_task(f"[bold white]NO.{self.volume_no} Pic Downloading...", total=len(self.img_url_map))
         if is_gui:
             len_iter = len(self.img_url_map.items())
             signal.emit('start')
@@ -257,6 +262,7 @@ class Editer(object):
                 content = await self.get_html_img(img_url)
                 with open(img_path+f'/{img_name}.jpg', 'wb') as f:
                     f.write(content) #写入二进制内容
+                    p.update(task,advance=1)
 
     def get_cover(self, is_gui=False, signal=None):
         textfile = os.path.join(self.text_path, 'cover.xhtml')

@@ -2,6 +2,7 @@ import argparse
 from Editer import Editer
 import os
 import asyncio
+from rich.progress import Progress
 
 def parse_args():
     """Parse input arguments."""
@@ -31,7 +32,7 @@ async def download_single_volume(root_path,
                            hang_signal=None,
                            progressring_signal=None,
                            cover_signal=None,
-                           edit_line_hang=None):
+                           edit_line_hang=None,progress:Progress=None):
     
     editer = Editer(root_path=root_path, book_no=book_no, volume_no=volume_no)
     await editer.fillhtmlandsm()
@@ -51,7 +52,7 @@ async def download_single_volume(root_path,
     
 
     print('正在下载插图.....................................')
-    await editer.get_image(is_gui=is_gui, signal=progressring_signal)
+    await editer.get_image(is_gui=is_gui, signal=progressring_signal,p=progress)
     
     print('正在编辑元数据....')
     editer.get_cover(is_gui=is_gui, signal=cover_signal)
@@ -73,6 +74,7 @@ async def downloader_router(root_path,
                       cover_signal=None,
                       edit_line_hang=None):
     is_multi_chap = False
+    progress = Progress()
     if len(book_no)==0:
         print('请检查输入是否完整正确！')
         return
@@ -103,13 +105,15 @@ async def downloader_router(root_path,
     else:
             print('请检查输入是否完整正确！')
             return
+    progress.start()
     print('正在积极地获取书籍信息....')
     if is_multi_chap:
-        tasks= [download_single_volume(root_path, book_no, volume_no, is_gui, hang_signal, progressring_signal, cover_signal, edit_line_hang) for volume_no in volume_no_list ]
+        tasks= [download_single_volume(root_path, book_no, volume_no, is_gui, hang_signal, progressring_signal, cover_signal, edit_line_hang,progress) for volume_no in volume_no_list ]
         await asyncio.gather(*tasks)
         print('所有下载任务都已经完成！')
+        progress.stop()
     else:
-        tasks= [download_single_volume(root_path, book_no, volume_no, is_gui, hang_signal, progressring_signal, cover_signal, edit_line_hang)]
+        tasks= [download_single_volume(root_path, book_no, volume_no, is_gui, hang_signal, progressring_signal, cover_signal, edit_line_hang,progress)]
         await asyncio.gather(*tasks)
     
 if __name__=='__main__':
